@@ -61,7 +61,20 @@ class DriveService:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     CREDENTIALS_PATH, SCOPES
                 )
-                creds = flow.run_local_server(port=0)
+                # Try browser-based auth first (local dev), fall back to console (server)
+                try:
+                    creds = flow.run_local_server(port=0)
+                except Exception:
+                    # Headless server — print URL for manual auth
+                    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+                    auth_url, _ = flow.authorization_url(prompt="consent")
+                    print("\n" + "=" * 60)
+                    print("OPEN THIS URL IN YOUR PC BROWSER:")
+                    print(auth_url)
+                    print("=" * 60)
+                    code = input("\nPaste the authorization code here: ").strip()
+                    flow.fetch_token(code=code)
+                    creds = flow.credentials
 
             # Save token for future use
             token_dir = Path(TOKEN_PATH).parent
