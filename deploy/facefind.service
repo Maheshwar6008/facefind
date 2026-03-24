@@ -1,0 +1,24 @@
+# FaceFind Backend — systemd Service
+# Copy to: /etc/systemd/system/facefind.service
+
+[Unit]
+Description=FaceFind FastAPI Backend
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/facefind/backend
+Environment="PATH=/var/www/facefind/backend/venv/bin"
+ExecStart=/var/www/facefind/backend/venv/bin/gunicorn main:app \
+    --workers 2 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8000 \
+    --timeout 120 \
+    --access-logfile /var/log/facefind/access.log \
+    --error-logfile /var/log/facefind/error.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
