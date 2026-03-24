@@ -192,11 +192,11 @@ async def match_selfie(
     k = top_k if top_k is not None else TOP_K_RESULTS
     matches = match_engine.search(embedding, top_k=k, threshold=th)
 
-    # Add thumbnail URLs
+    # Add API-proxied URLs (direct Drive URLs return 403 for private files)
     for match in matches:
         if match.get("drive_id"):
-            match["thumbnail_url"] = f"https://drive.google.com/thumbnail?id={match['drive_id']}&sz=s400"
-            match["view_url"] = f"https://drive.google.com/uc?id={match['drive_id']}&export=view"
+            match["thumbnail_url"] = f"/api/thumbnail/{match['drive_id']}"
+            match["view_url"] = f"/api/download/{match['drive_id']}"
 
     return {
         "success": True,
@@ -342,10 +342,45 @@ async def download_image(drive_id: str, _auth=Depends(verify_auth)):
         raise HTTPException(status_code=500, detail=f"Failed to download image: {str(e)}")
 
 
+_thumb_cache: dict[str, bytes] = {}
+
 @app.get("/api/thumbnail/{drive_id}")
-async def get_thumbnail(drive_id: str, size: int = Query(default=400)):
-    """Get thumbnail URL for an image."""
-    return {"url": f"https://drive.google.com/thumbnail?id={drive_id}&sz=s{size}"}
+async def get_thumbnail(drive_id: str, _auth=Depends(verify_auth)):
+    """Download and serve thumbnail for an image via backend (avoids 403)."""
+    # Check cache first
+    if drive_id in _thumb_cache:
+        return StreamingResponse(
+            io.BytesIO(_thumb_cache[drive_id]),
+            media_type="image/jpeg"
+        )
+
+    if not drive_service.service:
+        if not drive_service.authenticate():
+            raise HTTPException(status_code=503, detail="Google Drive not authenticated")
+
+    try:
+        image_bytes = drive_service.download_image(drive_id)
+
+        # Resize to thumbnail (save memory)
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes))
+        img.thumbnail((400, 400))
+        thumb_buffer = io.BytesIO()
+        img.save(thumb_buffer, format="JPEG", quality=75)
+        thumb_bytes = thumb_buffer.getvalue()
+
+        # Cache (limit to 500 thumbnails ~50MB)
+        if len(_thumb_cache) < 500:
+            _thumb_cache[drive_id] = thumb_bytes
+
+        return StreamingResponse(
+            io.BytesIO(thumb_bytes),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
+    except Exception as e:
+        logger.error(f"Thumbnail error for {drive_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load thumbnail")
 
 
 # ─── Health Check ─────────────────────────────────────────

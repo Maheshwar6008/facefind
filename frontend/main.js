@@ -303,9 +303,10 @@ function createResultCard(match, idx) {
 
     card.innerHTML = `
         <img class="card-img" 
-             src="${match.thumbnail_url || ''}" 
+             src="" 
              alt="${match.filename || 'Matched photo'}"
              loading="lazy"
+             data-drive-id="${match.drive_id}"
              onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22><rect width=%22200%22 height=%22200%22 fill=%22%231a1a3e%22/><text x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%235050a0%22 font-size=%2214%22>No Preview</text></svg>'">
         <div class="card-checkbox" data-index="${idx}"></div>
         <button class="card-download" data-drive-id="${match.drive_id}" title="Download">
@@ -323,6 +324,15 @@ function createResultCard(match, idx) {
             </div>
         </div>
     `;
+
+    // Load thumbnail with auth header
+    const img = card.querySelector('.card-img');
+    if (match.thumbnail_url) {
+        fetch(match.thumbnail_url, { headers: getAuthHeaders() })
+            .then(res => res.ok ? res.blob() : Promise.reject())
+            .then(blob => { img.src = URL.createObjectURL(blob); })
+            .catch(() => { img.dispatchEvent(new Event('error')); });
+    }
 
     // Checkbox click
     const checkbox = card.querySelector('.card-checkbox');
@@ -403,16 +413,22 @@ btnDownloadSelected.addEventListener('click', () => {
     });
 });
 
-function downloadSingle(driveId, filename) {
-    const url = `https://drive.google.com/uc?id=${driveId}&export=download`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename || 'photo.jpg';
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+async function downloadSingle(driveId, filename) {
+    try {
+        const res = await authFetch(`${API_BASE}/download/${driveId}`);
+        if (!res.ok) throw new Error('Download failed');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || 'photo.jpg';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        showError('Download failed: ' + err.message);
+    }
 }
 
 
